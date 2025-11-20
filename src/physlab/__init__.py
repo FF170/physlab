@@ -1,7 +1,7 @@
 """
 PhysLab - Библиотека для обработки лабораторных работ по физике
 """
-from .version import __version__
+from .__version__ import __version__
 from .core import phys, LabProcessor, graph, sin, cos, tg, ctg, exp, ln, log10, sqrt, arcsin, arccos, arctg
 
 __author__ = "Vsevolod Filippov"
