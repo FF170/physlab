@@ -829,9 +829,9 @@ class ErrorProcessor:
         # Веса = 1 / σ²
         weights = 1.0 / (positive_errors ** 2)
         
-        # Нормализуем веса
+        #Не нормализуем веса
         if np.sum(weights) > 0:
-            weights = weights / np.sum(weights)
+            pass #weights = weights / np.sum(weights)
         
         return weights
     
@@ -871,7 +871,7 @@ class EnhancedLeastSquares:
     
     def _ordinary_least_squares(self, x: np.ndarray, y: np.ndarray) -> Tuple['phys', 'phys', dict]:
         """
-        Улучшенный обычный МНК с обработкой вырожденных данных.
+        Улучшенный обычный МНК с правильными формулами погрешностей
         """
         n = len(x)
         
@@ -883,78 +883,29 @@ class EnhancedLeastSquares:
         y_range = np.max(y) - np.min(y)
         
         if x_range < 1e-12:
-            # Все x одинаковые - вертикальная линия
-            # В этом случае k = inf, что некорректно для МНК
             raise ValueError("Данные вырождены: все значения X одинаковые")
         
         if y_range < 1e-12:
             # Все y одинаковые - горизонтальная линия
             k_value = 0.0
             b_value = np.mean(y)
-            sigma_k = 0.0
-            sigma_b = np.std(y) / np.sqrt(n) if n > 1 else 0.0
+            # Погрешности на основе разброса данных
+            if n > 1:
+                sigma_y = np.std(y, ddof=1)
+                sigma_k = sigma_y / (np.std(x, ddof=1) * np.sqrt(n)) if np.std(x, ddof=1) > 0 else float('inf')
+                sigma_b = sigma_y / np.sqrt(n)
+            else:
+                sigma_k = 0.0
+                sigma_b = 0.0
             
             stats = {'r_squared': 0.0, 'sigma_y': np.std(y) if n > 1 else 0.0, 'residuals': y - b_value}
             return phys(k_value, sigma_k), phys(b_value, sigma_b), stats
         
-        # Оригинальные вычисления для невырожденного случая
-        sum_x = np.sum(x)
-        sum_y = np.sum(y)
-        sum_xy = np.sum(x * y)
-        sum_x2 = np.sum(x ** 2)
-        
-        denominator = n * sum_x2 - sum_x ** 2
-        
-        # Проверяем на численную стабильность
-        if abs(denominator) < 1e-12 * (n * sum_x2):
-            # Численно нестабильные данные - используем более устойчивый метод
-            return self._robust_ordinary_least_squares(x, y)
-        
-        k = (n * sum_xy - sum_x * sum_y) / denominator
-        b = (sum_y * sum_x2 - sum_x * sum_xy) / denominator
-        
-        # Вычисляем стандартные ошибки
-        y_pred = k * x + b
-        residuals = y - y_pred
-        
-        if n > 2:
-            sigma2 = np.sum(residuals ** 2) / (n - 2)
-        else:
-            sigma2 = np.var(residuals) if n > 1 else 0.0
-        
+        # Используем центрированные данные для лучшей численной устойчивости
         x_mean = np.mean(x)
-        sxx = np.sum((x - x_mean) ** 2)
-        
-        if sxx > 0:
-            sigma_k = np.sqrt(sigma2 / sxx)
-            sigma_b = np.sqrt(sigma2 * (1/n + x_mean**2 / sxx))
-        else:
-            sigma_k = 0.0
-            sigma_b = np.sqrt(sigma2 / n) if n > 0 else 0.0
-        
-        # Статистики
-        ss_tot = np.sum((y - np.mean(y)) ** 2)
-        ss_res = np.sum(residuals ** 2)
-        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
-        
-        stats = {
-            'r_squared': r_squared,
-            'sigma_y': np.sqrt(sigma2) if sigma2 > 0 else 0.0,
-            'residuals': residuals
-        }
-        
-        return phys(k, sigma_k), phys(b, sigma_b), stats
-
-    def _robust_ordinary_least_squares(self, x: np.ndarray, y: np.ndarray) -> Tuple['phys', 'phys', dict]:
-        """
-        Устойчивый МНК для численно нестабильных данных.
-        Использует центрирование данных для улучшения стабильности.
-        """
-        n = len(x)
-        
-        # Центрируем данные
-        x_centered = x - np.mean(x)
-        y_centered = y - np.mean(y)
+        y_mean = np.mean(y)
+        x_centered = x - x_mean
+        y_centered = y - y_mean
         
         # Вычисляем наклон через ковариацию
         covariance = np.sum(x_centered * y_centered)
@@ -965,26 +916,27 @@ class EnhancedLeastSquares:
         else:
             k_value = covariance / x_variance
         
-        b_value = np.mean(y) - k_value * np.mean(x)
+        b_value = y_mean - k_value * x_mean
         
         # Оценка погрешностей
         y_pred = k_value * x + b_value
         residuals = y - y_pred
         
         if n > 2:
-            sigma2 = np.sum(residuals ** 2) / (n - 2)
+            sigma2 = np.sum(residuals ** 2) / (n - 2)  # Несмещенная оценка
         else:
             sigma2 = np.var(residuals) if n > 1 else 0.0
         
-        if x_variance > 0 and n > 0:
+        # Стандартные ошибки коэффициентов
+        if x_variance > 0:
             sigma_k = np.sqrt(sigma2 / x_variance)
-            sigma_b = np.sqrt(sigma2 * (1/n + (np.mean(x)**2) / x_variance))
+            sigma_b = np.sqrt(sigma2 * (1/n + x_mean**2 / x_variance))
         else:
             sigma_k = 0.0
             sigma_b = np.sqrt(sigma2 / n) if n > 0 else 0.0
         
         # Статистики
-        ss_tot = np.sum((y - np.mean(y)) ** 2)
+        ss_tot = np.sum((y - y_mean) ** 2)
         ss_res = np.sum(residuals ** 2)
         r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
         
@@ -995,11 +947,146 @@ class EnhancedLeastSquares:
         }
         
         return phys(k_value, sigma_k), phys(b_value, sigma_b), stats
- 
+
+    def _robust_ordinary_least_squares(self, x: np.ndarray, y: np.ndarray) -> Tuple['phys', 'phys', dict]:
+        """
+        Устойчивый МНК для численно нестабильных данных с использованием SVD.
+        """
+        n = len(x)
+        
+        try:
+            # Используем SVD метод
+            k_value, b_value = self._svd_least_squares(x, y)
+            
+            # Оценка погрешностей через остатки
+            y_pred = k_value * x + b_value
+            residuals = y - y_pred
+            
+            if n > 2:
+                sigma2 = np.sum(residuals ** 2) / (n - 2)
+            else:
+                sigma2 = np.var(residuals) if n > 1 else 0.0
+            
+            # Для SVD оценка погрешностей сложнее, используем приближенные формулы
+            x_mean = np.mean(x)
+            x_variance = np.sum((x - x_mean) ** 2)
+            
+            if x_variance > 0 and n > 0:
+                sigma_k = np.sqrt(sigma2 / x_variance)
+                sigma_b = np.sqrt(sigma2 * (1/n + x_mean**2 / x_variance))
+            else:
+                sigma_k = 0.0
+                sigma_b = np.sqrt(sigma2 / n) if n > 0 else 0.0
+            
+            # Статистики
+            ss_tot = np.sum((y - np.mean(y)) ** 2)
+            ss_res = np.sum(residuals ** 2)
+            r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+            
+            stats = {
+                'r_squared': r_squared,
+                'sigma_y': np.sqrt(sigma2) if sigma2 > 0 else 0.0,
+                'residuals': residuals,
+                'method': 'SVD'
+            }
+            
+            return phys(k_value, sigma_k), phys(b_value, sigma_b), stats
+            
+        except Exception as e:
+            # Аварийный возврат
+            print(f"Ошибка в устойчивом МНК: {e}")
+            return phys(0.0, float('inf')), phys(np.mean(y), float('inf')), {'error': str(e)}
+
+    def _handle_degenerate_cases(self, x: np.ndarray, y: np.ndarray, 
+                               x_err: np.ndarray = None, y_err: np.ndarray = None):
+        """
+        Обрабатывает вырожденные случаи: одна точка, вертикальная линия и т.д.
+        """
+        n = len(x)
+        
+        # Случай одной точки
+        if n == 1:
+            k_value = 0.0
+            k_sigma = float('inf')  # Бесконечная погрешность - наклон не определен
+            b_value = y[0]
+            b_sigma = y_err[0] if y_err is not None and len(y_err) > 0 else float('inf')
+            
+            stats = {
+                'r_squared': 0.0,
+                'sigma_y': 0.0,
+                'residuals': np.array([0.0]),
+                'warning': 'Одна точка данных - наклон не определен'
+            }
+            return phys(k_value, k_sigma), phys(b_value, b_sigma), stats
+        
+        # Случай вертикальной линии (все x одинаковые)
+        x_range = np.max(x) - np.min(x)
+        if x_range < 1e-12:
+            k_value = float('inf')  # Бесконечный наклон
+            k_sigma = float('inf')
+            b_value = np.mean(y)
+            
+            # Погрешность b на основе разброса y
+            if n > 1:
+                b_sigma = np.std(y, ddof=1) / np.sqrt(n)
+            else:
+                b_sigma = y_err[0] if y_err is not None and len(y_err) > 0 else float('inf')
+            
+            stats = {
+                'r_squared': 0.0,
+                'sigma_y': np.std(y) if n > 1 else 0.0,
+                'residuals': y - b_value,
+                'warning': 'Вертикальная линия - наклон бесконечен'
+            }
+            return phys(k_value, k_sigma), phys(b_value, b_sigma), stats
+        
+        # Если не вырожденный случай, возвращаем None
+        return None
+
+    def _svd_least_squares(self, x: np.ndarray, y: np.ndarray, weights: np.ndarray = None):
+        """
+        Устойчивое решение МНК через SVD разложение.
+        """
+        n = len(x)
+        
+        # Подготавливаем матрицу A
+        if weights is not None:
+            A = np.vstack([np.sqrt(weights) * x, np.sqrt(weights)]).T
+            b_weighted = np.sqrt(weights) * y
+        else:
+            A = np.vstack([x, np.ones(n)]).T
+            b_weighted = y
+        
+        # SVD разложение
+        try:
+            U, s, Vt = np.linalg.svd(A, full_matrices=False)
+            
+            # Регуляризация малых сингулярных чисел
+            threshold = max(A.shape) * np.finfo(A.dtype).eps * s[0]
+            s_inv = np.zeros_like(s)
+            s_inv[s > threshold] = 1.0 / s[s > threshold]
+            
+            # Решение системы
+            coeffs = Vt.T @ (s_inv * (U.T @ b_weighted))
+            
+            k = coeffs[0]
+            b = coeffs[1]
+            
+            return k, b
+            
+        except np.linalg.LinAlgError:
+            # Если SVD не удался, используем псевдообратную матрицу
+            try:
+                coeffs = np.linalg.pinv(A) @ b_weighted
+                return coeffs[0], coeffs[1]
+            except:
+                # Последний резервный вариант
+                return 0.0, np.mean(y)
+     
     def _weighted_least_squares_y(self, x: np.ndarray, y: np.ndarray, 
                                 y_err: np.ndarray) -> Tuple['phys', 'phys', dict]:
         """
-        Взвешенный МНК с погрешностями по Y.
+        Взвешенный МНК с погрешностями по Y - ИСПРАВЛЕННАЯ ВЕРСИЯ
         """
         n = len(x)
         
@@ -1015,7 +1102,6 @@ class EnhancedLeastSquares:
         Sy = np.sum(weights * y)
         Sxx = np.sum(weights * x * x)
         Sxy = np.sum(weights * x * y)
-        Syy = np.sum(weights * y * y)
         
         # Вычисляем коэффициенты
         denominator = S * Sxx - Sx ** 2
@@ -1029,9 +1115,17 @@ class EnhancedLeastSquares:
         y_pred = k * x + b
         residuals = y - y_pred
         
-        # Взвешенные стандартные ошибки
-        sigma_k = np.sqrt(S / denominator)
-        sigma_b = np.sqrt(Sxx / denominator)
+        # Взвешенное стандартное отклонение остатков
+        if n > 2:
+            # sigma_y = sqrt( sum(w * residuals^2) / (n-2) )
+            chi2 = np.sum(weights * residuals ** 2)
+            sigma_y = np.sqrt(chi2 / (n - 2))
+        else:
+            sigma_y = 0.0
+        
+        # Стандартные ошибки коэффициентов - ИСПРАВЛЕННЫЕ ФОРМУЛЫ
+        sigma_k = sigma_y * np.sqrt(S / denominator)
+        sigma_b = sigma_y * np.sqrt(Sxx / denominator)
         
         # Статистики
         y_mean_weighted = np.average(y, weights=weights)
@@ -1040,13 +1134,14 @@ class EnhancedLeastSquares:
         r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
         
         # χ²
-        chi2 = np.sum((residuals / y_err) ** 2) if self.error_processor.has_errors(y_err) else 0.0
+        chi2_value = np.sum((residuals / y_err) ** 2) if self.error_processor.has_errors(y_err) else 0.0
         
         stats = {
             'r_squared': r_squared,
-            'chi2': chi2,
+            'chi2': chi2_value,
             'residuals': residuals,
-            'weights': weights
+            'weights': weights,
+            'sigma_y': sigma_y
         }
         
         return phys(k, sigma_k), phys(b, sigma_b), stats
@@ -1054,18 +1149,80 @@ class EnhancedLeastSquares:
     def _weighted_least_squares_x(self, x: np.ndarray, y: np.ndarray,
                                 x_err: np.ndarray) -> Tuple['phys', 'phys', dict]:
         """
-        МНК с погрешностями по X.
-        Используем метод проецирования погрешностей на Y.
+        МНК с погрешностями по X - УЛУЧШЕННАЯ ВЕРСИЯ.
         """
-        # Первая итерация: обычный МНК для получения начального k
-        k_initial, b_initial, _ = self._ordinary_least_squares(x, y)
+        # Используем итеративный метод с лучшей сходимостью
+        max_iterations = 10
+        tolerance = 1e-6
         
-        # Проецируем погрешности по X на Y
-        projected_y_err = np.abs(k_initial.value) * x_err
+        # Начальное приближение через обычный МНК
+        k_current, b_current, _ = self._ordinary_least_squares(x, y)
+        k_value = k_current.value
+        b_value = b_current.value
         
-        # Вторая итерация: взвешенный МНК с проецированными погрешностями
-        return self._weighted_least_squares_y(x, y, projected_y_err)
-    
+        for iteration in range(max_iterations):
+            # Проецируем погрешности по X на Y
+            projected_y_err = np.abs(k_value) * x_err
+            
+            # Объединяем с погрешностями по Y (если они есть)
+            total_y_err = projected_y_err  # В данном методе предполагаем, что y_err = 0
+            
+            # Взвешенный МНК с суммарными погрешностями
+            weights = 1.0 / (total_y_err ** 2)
+            
+            # Взвешенные суммы
+            S = np.sum(weights)
+            Sx = np.sum(weights * x)
+            Sy = np.sum(weights * y)
+            Sxx = np.sum(weights * x * x)
+            Sxy = np.sum(weights * x * y)
+            
+            denominator = S * Sxx - Sx ** 2
+            if abs(denominator) < 1e-12:
+                break
+                
+            k_new = (S * Sxy - Sx * Sy) / denominator
+            b_new = (Sxx * Sy - Sx * Sxy) / denominator
+            
+            # Проверяем сходимость
+            if abs(k_new - k_value) < tolerance and abs(b_new - b_value) < tolerance:
+                break
+                
+            k_value = k_new
+            b_value = b_new
+        
+        # Финальная оценка погрешностей
+        y_pred = k_value * x + b_value
+        residuals = y - y_pred
+        
+        if len(x) > 2:
+            sigma2 = np.sum(residuals ** 2) / (len(x) - 2)
+        else:
+            sigma2 = np.var(residuals) if len(x) > 1 else 0.0
+        
+        # Используем финальные веса для оценки погрешностей
+        final_projected_y_err = np.abs(k_value) * x_err
+        final_weights = 1.0 / (final_projected_y_err ** 2)
+        
+        S_final = np.sum(final_weights)
+        Sxx_final = np.sum(final_weights * x * x)
+        denominator_final = S_final * Sxx_final - (np.sum(final_weights * x)) ** 2
+        
+        if denominator_final > 0:
+            sigma_k = np.sqrt(S_final / denominator_final) * np.sqrt(sigma2)
+            sigma_b = np.sqrt(Sxx_final / denominator_final) * np.sqrt(sigma2)
+        else:
+            sigma_k = 0.0
+            sigma_b = 0.0
+        
+        stats = {
+            'r_squared': 1 - np.sum(residuals**2) / np.sum((y - np.mean(y))**2) if len(y) > 1 else 0.0,
+            'residuals': residuals,
+            'iterations': iteration + 1
+        }
+        
+        return phys(k_value, sigma_k), phys(b_value, sigma_b), stats
+        
     def _total_least_squares(self, x: np.ndarray, y: np.ndarray,
                            x_err: np.ndarray, y_err: np.ndarray) -> Tuple['phys', 'phys', dict]:
         """
@@ -1086,30 +1243,15 @@ class EnhancedLeastSquares:
             x_err: np.ndarray = None, y_err: np.ndarray = None,
             method: str = 'auto') -> Tuple['phys', 'phys', dict]:
         """
-        Выполняет МНК с автоматическим выбором метода.
-        
-        Parameters:
-        -----------
-        x, y : np.ndarray
-            Данные по осям X и Y
-        x_err, y_err : np.ndarray, optional
-            Погрешности по X и Y
-        method : str
-            'auto' - автоматический выбор
-            'ols' - обычный МНК
-            'wls_y' - взвешенный по Y
-            'wls_x' - взвешенный по X
-            'wls_xy' - полный взвешенный
-            
-        Returns:
-        --------
-        k, b : phys
-            Коэффициенты наклона и смещения
-        stats : dict
-            Статистические показатели (R², χ² и др.)
+        Выполняет МНК с автоматическим выбором метода и обработкой вырожденных случаев.
         """
         # Проверяем и очищаем данные от NaN и Inf
         x_clean, y_clean, x_err_clean, y_err_clean = self._clean_data(x, y, x_err, y_err)
+        
+        # Сначала проверяем вырожденные случаи
+        degenerate_result = self._handle_degenerate_cases(x_clean, y_clean, x_err_clean, y_err_clean)
+        if degenerate_result is not None:
+            return degenerate_result
         
         if len(x_clean) < 2:
             raise ValueError("После очистки от NaN/Inf осталось меньше 2 точек")
@@ -1123,16 +1265,21 @@ class EnhancedLeastSquares:
             method = self._select_method(x_err_processed, y_err_processed)
         
         # Выполнение выбранного метода
-        if method == 'ols':
+        try:
+            if method == 'ols':
+                return self._ordinary_least_squares(x_clean, y_clean)
+            elif method == 'wls_y':
+                return self._weighted_least_squares_y(x_clean, y_clean, y_err_processed)
+            elif method == 'wls_x':
+                return self._weighted_least_squares_x(x_clean, y_clean, x_err_processed)
+            elif method == 'wls_xy':
+                return self._total_least_squares(x_clean, y_clean, x_err_processed, y_err_processed)
+            else:
+                raise ValueError(f"Неизвестный метод: {method}")
+        except Exception as e:
+            # Если метод падает, пробуем обычный МНК как запасной вариант
+            print(f"Предупреждение: метод {method} не удался: {e}. Используется обычный МНК.")
             return self._ordinary_least_squares(x_clean, y_clean)
-        elif method == 'wls_y':
-            return self._weighted_least_squares_y(x_clean, y_clean, y_err_processed)
-        elif method == 'wls_x':
-            return self._weighted_least_squares_x(x_clean, y_clean, x_err_processed)
-        elif method == 'wls_xy':
-            return self._total_least_squares(x_clean, y_clean, x_err_processed, y_err_processed)
-        else:
-            raise ValueError(f"Неизвестный метод: {method}")
     
     def _clean_data(self, x: np.ndarray, y: np.ndarray, 
                    x_err: np.ndarray = None, y_err: np.ndarray = None):
@@ -1287,40 +1434,50 @@ class LabProcessor:
     def weighted_mean(arr, err=None):
         """
         Вычисляет взвешенное среднее значение и его погрешность.
-        Поддерживает phys объекты.
+        ПРАВИЛЬНАЯ РЕАЛИЗАЦИЯ.
         """
+        if not arr:
+            raise ValueError("Пустой массив данных")
+        
         # Извлекаем значения и погрешности из phys объектов
         if isinstance(arr[0], phys):
             values = np.array([x.value for x in arr])
             if err is None:
-                err = np.array([x.sigma for x in arr])
+                errors = np.array([x.sigma for x in arr])
+            else:
+                errors = err
         else:
             values = np.array(arr)
+            errors = err
         
-        if err is not None:
-            if isinstance(err, (int, float, np.number)):
-                err = [err] * len(values)
-            arr_err = np.array(err)
-            if arr_err.ndim == 2:  # Если yerr задан как [yerr_lower, yerr_upper]
-                arr_err = (err[0] + err[1]) / 2  # Средние погрешности по y
-            else:  # Если yerr задан как sigma_y
-                arr_err = err
-            if len(arr_err) != len(values) or len(values) == 0:
-                print(f"Ошибка: массивы разной длины или пустые:\narr: {values}\nerr: {arr_err}")
-        else:  # Если погрешности по y отсутствуют
-            arr_err = None
-
-        if arr_err is None:
-            mean = np.sum(values) / len(values)
-            sigma_mean = np.sqrt(np.sum(((values - mean) ** 2)) / np.sqrt(len(values) - 1))
-        else:
-            weights = 1 / arr_err**2
-            mean = np.sum(weights * values) / np.sum(weights)
-            delta_mean = 1 / (np.sum(weights))**0.5
-            sigma_mean_0 = np.sqrt(np.sum(((values - mean)**2))) / np.sqrt(len(values))
-            sigma_mean = (delta_mean**2 + sigma_mean_0**2)**0.5
+        # Если погрешности не заданы, используем обычное среднее
+        if errors is None:
+            mean_val = np.mean(values)
+            if len(values) > 1:
+                sigma_mean = np.std(values, ddof=1) / np.sqrt(len(values))
+            else:
+                sigma_mean = 0.0
+            return phys(mean_val, sigma_mean)
         
-        return phys(mean, sigma_mean)
+        # Нормализуем погрешности
+        if isinstance(errors, (int, float, np.number)):
+            errors = np.full_like(values, errors)
+        elif isinstance(errors, (list, tuple)):
+            errors = np.array(errors)
+        
+        # Убеждаемся, что все погрешности положительные
+        errors = np.maximum(errors, 1e-10)  # Избегаем деления на ноль
+        
+        # Вычисляем веса
+        weights = 1.0 / (errors ** 2)
+        
+        # Взвешенное среднее
+        mean_val = np.sum(weights * values) / np.sum(weights)
+        
+        # Погрешность взвешенного среднего
+        sigma_mean = 1.0 / np.sqrt(np.sum(weights))
+        
+        return phys(mean_val, sigma_mean)
 
     @staticmethod
     def _extract_phys_data(data, external_err):
@@ -2062,12 +2219,23 @@ class graph:
                         bbox=bbox_props, verticalalignment='top', fontsize=10)
         return self
     
-    def quick_save(self, filename, dpi=300, **kwargs):
+    def quick_save(self, filename, subdir = '', format = 'pdf', dpi=300, **kwargs):
         """Быстрое сохранение графика с умными настройками."""
-        self.plt.tight_layout()
-        save_kwargs = {'dpi': dpi, 'bbox_inches': 'tight', 'facecolor': 'white'}
-        save_kwargs.update(kwargs)
-        self.fig.savefig(filename, **save_kwargs)
+        
+        
+        if filename == '':
+            if self.gca().get_title() != '':
+                filename = self.gca().get_title()
+            else:
+                filename = 'Graph'
+
+        fullname = f"{subdir}{'/' if subdir else ''}{filename}.{format}"
+        print(fullname)
+        #self.plt.tight_layout()
+        
+        #save_kwargs = {'dpi': dpi, 'bbox_inches': 'tight', 'facecolor': 'white'}
+        #save_kwargs.update(kwargs)
+        self.savefig(fullname, format = format, **kwargs)
         return self
     
     # ==================== СТАРЫЙ API ДЛЯ ОБРАТНОЙ СОВМЕСТИМОСТИ ====================

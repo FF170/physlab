@@ -228,7 +228,7 @@ y = phys([2.1, 3.9, 6.0, 8.2, 9.8], [0.2, 0.3, 0.25, 0.4, 0.35])
 g = graph(x, y, approx=True)
 g.xlabel('Time, s')
 g.ylabel('Velocity, m/s')
-g.title('Velocity vs Time')
+g.add_title('Velocity vs Time')
 g.add_params_text()
 g.show()
 ```
@@ -248,7 +248,7 @@ y_experiments = [
 g = graph(x_common, y_experiments, approx=True)
 g.xlabel('Voltage, V')
 g.ylabel('Current, A') 
-g.title('Current-Voltage Characteristics')
+g.add_title('Current-Voltage Characteristics')
 g.add_params_text(series_names=['Experiment 1', 'Experiment 2', 'Experiment 3'])
 g.show()
 ```
@@ -270,7 +270,7 @@ y_sets = [
 g = graph(x_sets, y_sets, approx=True)
 g.xlabel('Distance, m')
 g.ylabel('Force, N')
-g.title('Dependencies for Different Conditions')
+g.add_title('Dependencies for Different Conditions')
 g.show()
 ```
 
@@ -280,12 +280,12 @@ g.show()
 # Scientific style with method chaining
 graph(x, y, approx=True)\
     .style_scientific()\
-    .title('Experimental Dependency', fontsize=16)\
+    .add_title('Experimental Dependency', fontsize=16)\
     .auto_legend(loc='upper left')\
     .add_stats(x=0.65, y=0.15)\
     .xlabel('$t$, s', fontsize=14)\
     .ylabel('$v$, m/s', fontsize=14)\
-    .quick_save('experiment.png', dpi=300)
+    .quick_save('experiment', format = 'jpg')
 ```
 
 ## Practical Examples
@@ -310,7 +310,7 @@ print(f"Measured free fall acceleration: {g_experimental}")
 graph(times_squared, distances, approx=True)\
     .xlabel('$t^2$, s²')\
     .ylabel('$s$, m')\
-    .title('Free Fall Acceleration Determination')\
+    .add_title('Free Fall Acceleration Determination')\
     .add_params_text()\
     .show()
 ```
@@ -353,7 +353,7 @@ periods = 2 * np.pi * sqrt(lengths / g)
 graph(lengths, periods)\
     .xlabel('Pendulum Length, m')\
     .ylabel('Oscillation Period, s')\
-    .title('Period vs Length Dependency')\
+    .add_title('Period vs Length Dependency')\
     .show()
 ```
 
@@ -396,7 +396,7 @@ phys(value, abs_err=0.0)  # value: number, list, np.array
 
 **Main Methods:**
 - __init__(x, y, approx=True) - graph creation
-- title(), xlabel(), ylabel() - styling
+- add_title(), xlabel(), ylabel() - styling
 - add_params_text() - approximation parameters
 - quick_save() - saving
 
